@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>แดชบอร์ด รับ-ส่งผ้า</title>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .cards { display: flex; gap: 20px; }
+    .card { flex: 1; padding: 20px; background: #f8f8f8; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align:center; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f2f2f2; }
+    .charts { display: flex; gap: 20px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>📊 แดชบอร์ด รายการรับ/ส่งผ้า</h1>
+
+  <div class="cards">
+    <div class="card"><h2 id="receive">--</h2><p>รวมรับ</p></div>
+    <div class="card"><h2 id="send">--</h2><p>รวมส่ง</p></div>
+    <div class="card"><h2 id="pending">--</h2><p>ค้าง</p></div>
+  </div>
+
+  <div class="charts">
+    <div id="barChart" style="width:400px;height:300px"></div>
+    <div id="gaugeChart" style="width:200px;height:200px"></div>
+  </div>
+
+  <table id="itemsTable"></table>
+
+  <script>
+    google.charts.load('current', {'packages':['corechart','gauge']});
+    google.charts.setOnLoadCallback(loadData);
+
+    function loadData() {
+      const query = new google.visualization.Query(
+        "https://docs.google.com/spreadsheets/d/1GRuJTxE_uV9Lpq47pg7tywmKBAzh7_pV6x9JBk3FtXc/gviz/tq?sheet=Dashboard%20รายการผ้า"
+      );
+      query.send(handleData);
+    }
+
+    function handleData(response) {
+      if (response.isError()) {
+        alert('Error: ' + response.getMessage());
+        return;
+      }
+      const data = response.getDataTable();
+
+      let totalReceive = 0;
+      let totalSend = 0;
+      let items = [];
+
+      for (let i = 0; i < data.getNumberOfRows(); i++) {
+        const hotel = data.getValue(i,0);
+        const date = data.getValue(i,1);
+        const item = data.getValue(i,2);
+        const qty  = Number(data.getValue(i,3));
+        const type = data.getValue(i,4);
+
+        if (type === "รับ") totalReceive += qty;
+        if (type === "ส่ง") totalSend += qty;
+
+        items.push({hotel, date, item, qty, type});
+      }
+
+      const pending = totalReceive - totalSend;
+
+      document.getElementById('receive').innerText = totalReceive;
+      document.getElementById('send').innerText = totalSend;
+      document.getElementById('pending').innerText = pending;
+
+      // ตาราง
+      let html = '<tr><th>โรงแรม</th><th>วันที่</th><th>รายการผ้า</th><th>จำนวน</th><th>ประเภท</th></tr>';
+      items.forEach(it => {
+        html += `<tr><td>${it.hotel}</td><td>${it.date}</td><td>${it.item}</td><td>${it.qty}</td><td>${it.type}</td></tr>`;
+      });
+      document.getElementById('itemsTable').innerHTML = html;
+
+      // กราฟแท่ง
+      const barData = google.visualization.arrayToDataTable([
+        ['ประเภท','จำนวน'],
+        ['รับ', totalReceive],
+        ['ส่ง', totalSend]
+      ]);
+      new google.visualization.ColumnChart(document.getElementById('barChart'))
+        .draw(barData, {legend:{position:'none'}, width:400, height:300});
+
+      // Gauge
+      const gaugeData = google.visualization.arrayToDataTable([
+        ['Label','Value'],
+        ['ค้าง', pending]
+      ]);
+      new google.visualization.Gauge(document.getElementById('gaugeChart'))
+        .draw(gaugeData, {width:200, height:200, redFrom:50,redTo:100,yellowFrom:20,yellowTo:50,minorTicks:5});
+    }
+  </script>
+</body>
+</html>
