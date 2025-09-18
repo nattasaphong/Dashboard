@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>รายงานการรับ/ส่งผ้า</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: "Prompt", sans-serif;
+      background: #fff;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: #f8f9fa;
+      border-radius: 15px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .big {
+      font-size: 28px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .content {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f3f4;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>รายการรับ/ส่งผ้า</h1>
+
+  <!-- การ์ดสรุป -->
+  <div class="dashboard">
+    <div class="card">
+      <div>รวมรับ</div>
+      <div class="big" id="sumIn">0</div>
+    </div>
+    <div class="card">
+      <div>รวมส่ง</div>
+      <div class="big" id="sumOut">0</div>
+    </div>
+    <div class="card">
+      <div>ค้าง</div>
+      <div class="big" id="pending">0</div>
+    </div>
+    <div class="card">
+      <div>เปอร์เซ็นต์ค้าง</div>
+      <div class="big" id="percentPending">0%</div>
+    </div>
+  </div>
+
+  <!-- ตาราง + กราฟ -->
+  <div class="content">
+    <div>
+      <table>
+        <thead>
+          <tr>
+            <th>ชื่อโรงแรม</th>
+            <th>วันที่</th>
+            <th>รายการผ้า</th>
+          </tr>
+        </thead>
+        <tbody id="dataTable"></tbody>
+      </table>
+    </div>
+    <div>
+      <canvas id="barChart" height="150"></canvas>
+      <canvas id="pieChart" height="150"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // 👉 เปลี่ยนชื่อแท็บชีทให้ตรงกับของคุณ เช่น &sheet=รวมยอด วางบิล
+    const sheetURL = "https://docs.google.com/spreadsheets/d/1GRuJTxE_uV9Lpq47pg7tywmKBAzh7_pV6x9JBk3FtXc/gviz/tq?tqx=out:json&sheet=Sheet1";
+
+    let barChart, pieChart;
+
+    // ✅ ฟังก์ชันแปลงวันที่จาก Google Sheet
+    function parseThaiDate(cell) {
+      if (!cell) return null;
+
+      // ถ้ามาแบบ formatted (f) เช่น "16/06/2568"
+      if (cell.f) {
+        const parts = cell.f.split("/");
+        if (parts.length === 3) {
+          let day = parseInt(parts[0]);
+          let month = parseInt(parts[1]) - 1;
+          let year = parseInt(parts[2]);
+          if (year > 2400) year -= 543; // แปลง พ.ศ. -> ค.ศ.
+          return new Date(year, month, day);
+        }
+      }
+
+      // ถ้ามาแบบ serial number เช่น 45567
+      if (cell.v && !isNaN(cell.v)) {
+        const baseDate = new Date(1899, 11, 30); // Excel/Sheets serial base
+        return new Date(baseDate.getTime() + cell.v * 24 * 60 * 60 * 1000);
+      }
+
+      // ถ้าเป็น string ISO เช่น "2025-09-18"
+      return new Date(cell.v);
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch(sheetURL);
+        let text = await res.text();
+        text = text.substring(47, text.length - 2); // ตัด wrapper ของ Google ออก
+        const json = JSON.parse(text);
+        const rows = json.table.rows;
+
+        let sumIn = 0, sumOut = 0;
+        let hotels = {};
+
+        rows.forEach(r => {
+          let hotel = r.c[0]?.v || "";
+          let date = parseThaiDate(r.c[1]);
+          let item = r.c[2]?.v || "";
+          let qty = r.c[3]?.v || 0;
+          let type = r.c[4]?.v || "";
+
+          if (type === "รับ") sumIn += qty;
+          if (type === "ส่ง") sumOut += qty;
+
+          let dateStr = date ? date.toLocaleDateString("th-TH") : "";
+          let key = hotel + "|" + dateStr;
+          if (!hotels[key]) hotels[key] = {hotel, dateStr, items: []};
+          hotels[key].items.push(`${item} (${qty})`);
+        });
+
+        // ✅ คำนวณค้าง = รวมรับ - รวมส่ง
+        let pending = sumIn - sumOut;
+
+        // update การ์ด
+        document.getElementById("sumIn").innerText = sumIn;
+        document.getElementById("sumOut").innerText = sumOut;
+        document.getElementById("pending").innerText = pending;
+        let percent = sumIn ? Math.round((pending / sumIn) * 100) : 0;
+        document.getElementById("percentPending").innerText = percent + "%";
+
+        // update ตาราง
+        let table = document.getElementById("dataTable");
+        table.innerHTML = "";
+        Object.values(hotels).forEach(it => {
+          table.innerHTML += `
+            <tr>
+              <td>${it.hotel}</td>
+              <td>${it.dateStr}</td>
+              <td>${it.items.join("<br>")}</td>
+            </tr>`;
+        });
+
+        // update กราฟแท่ง
+        if (barChart) barChart.destroy();
+        barChart = new Chart(document.getElementById("barChart"), {
+          type: "bar",
+          data: {
+            labels: ["รวมรับ", "รวมส่ง"],
+            datasets: [{
+              data: [sumIn, sumOut],
+              backgroundColor: ["#4caf50", "#2196f3"]
+            }]
+          }
+        });
+
+        // update กราฟวงกลม
+        if (pieChart) pieChart.destroy();
+        pieChart = new Chart(document.getElementById("pieChart"), {
+          type: "doughnut",
+          data: {
+            labels: ["ค้าง", "เสร็จสิ้น"],
+            datasets: [{
+              data: [pending, sumIn - pending],
+              backgroundColor: ["#e74c3c", "#95a5a6"]
+            }]
+          }
+        });
+
+      } catch (err) {
+        console.error("Error:", err);
+      }
+    }
+
+    fetchData();
+    setInterval(fetchData, 60000); // รีโหลดทุก 60 วินาที
+  </script>
+</body>
+</html>
